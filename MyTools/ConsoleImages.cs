@@ -303,12 +303,7 @@ public static class ConsoleImages
 
         try
         {
-            if (Console.IsOutputRedirected)
-            {
-                return (outputWidth, outputPixelHeight);
-            }
-
-            int maxWidth = global::System.Math.Max(1, Console.WindowWidth);
+            int maxWidth = GetSafeConsoleWidth();
             if (outputWidth > maxWidth)
             {
                 outputWidth = maxWidth;
@@ -318,7 +313,7 @@ public static class ConsoleImages
                 }
             }
 
-            int maxOutputRows = global::System.Math.Max(1, Console.WindowHeight);
+            int maxOutputRows = GetSafeConsoleRowCount();
             int maxOutputPixelHeight = GetMaxOutputPixelHeight(maxOutputRows, quality);
 
             if (outputPixelHeight > maxOutputPixelHeight)
@@ -338,11 +333,32 @@ public static class ConsoleImages
         catch (IOException)
         {
         }
+        catch (InvalidOperationException)
+        {
+        }
         catch (ArgumentOutOfRangeException)
         {
         }
 
         return (outputWidth, outputPixelHeight);
+    }
+
+    private static int GetSafeConsoleWidth()
+    {
+        int windowWidth = global::System.Math.Max(1, Console.WindowWidth);
+        int bufferWidth = global::System.Math.Max(1, Console.BufferWidth);
+        int maxWidth = global::System.Math.Min(windowWidth, bufferWidth);
+
+        return global::System.Math.Max(1, maxWidth - 1);
+    }
+
+    private static int GetSafeConsoleRowCount()
+    {
+        int windowHeight = global::System.Math.Max(1, Console.WindowHeight);
+        int bufferHeight = global::System.Math.Max(1, Console.BufferHeight);
+        int maxRows = global::System.Math.Min(windowHeight, bufferHeight);
+
+        return global::System.Math.Max(1, maxRows - 1);
     }
 
     private static void RenderHalfBlocks(RgbImage image, int outputWidth, int outputPixelHeight, StringBuilder builder)
