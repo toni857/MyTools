@@ -21,3 +21,22 @@ Console.Line();
 Console.LineWrite("Text nach leerer Zeile");
 Console.Line();
 ```
+
+## Kamera
+
+```csharp
+using My;
+
+string foto = ConsoleImages.GreifeAufKameraZuUmFotoZuMachen();
+ConsoleImages.ShowPhoto(foto);
+
+ConsoleImages.CameraVideoSource kamera =
+    ConsoleImages.GreifeAufKameraZuUmVideoZuMachen(durationSeconds: 10);
+
+ConsoleImages.ShowVideo(kamera);
+```
+
+Ohne `durationSeconds` laeuft das Kamera-Video, bis das Programm beendet wird.
+Mit `durationSeconds` stoppt `ShowVideo` nach dieser Zeit.
+
+Standardmaessig wird unter Linux `/dev/video0` ueber `ffmpeg` und `v4l2` verwendet.

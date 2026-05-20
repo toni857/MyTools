@@ -6,6 +6,60 @@ namespace My;
 
 public static class ConsoleImages
 {
+    public sealed record CameraVideoSource(
+        string CameraPath,
+        int CameraWidth,
+        int CameraHeight,
+        double Fps,
+        double? DurationSeconds);
+
+    public static string GreifeAufKameraZuUmFotoZuMachen(
+        string cameraPath = "/dev/video0",
+        int cameraWidth = 640,
+        int cameraHeight = 480,
+        string? outputPath = null)
+    {
+        ValidateCameraInput(cameraPath, cameraWidth, cameraHeight);
+
+        if (!IsCommandAvailable("ffmpeg"))
+        {
+            throw new InvalidOperationException("Fuer Kamera-Fotos wird ffmpeg im Systempfad benoetigt.");
+        }
+
+        string finalOutputPath = outputPath ?? Path.Combine(Path.GetTempPath(), $"camera-photo-{Guid.NewGuid():N}.jpg");
+        using Process process = StartCameraPhotoProcess(cameraPath, cameraWidth, cameraHeight, finalOutputPath);
+        process.WaitForExit();
+
+        if (process.ExitCode != 0 || !File.Exists(finalOutputPath))
+        {
+            throw new InvalidOperationException($"Das Kamera-Foto konnte nicht aufgenommen werden. ffmpeg Exit-Code: {process.ExitCode}.");
+        }
+
+        return finalOutputPath;
+    }
+
+    public static CameraVideoSource GreifeAufKameraZuUmVideoZuMachen(
+        string cameraPath = "/dev/video0",
+        int cameraWidth = 640,
+        int cameraHeight = 480,
+        double fps = 12,
+        double? durationSeconds = null)
+    {
+        ValidateCameraInput(cameraPath, cameraWidth, cameraHeight);
+
+        if (fps <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(fps), "Die FPS muessen groesser als 0 sein.");
+        }
+
+        if (durationSeconds <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(durationSeconds), "Der Timer muss groesser als 0 sein.");
+        }
+
+        return new CameraVideoSource(cameraPath, cameraWidth, cameraHeight, fps, durationSeconds);
+    }
+
     public static void ShowPhoto(
         string filePath,
         int width = 120,
@@ -32,6 +86,36 @@ public static class ConsoleImages
     }
 
     public static void ShowVideo(
+        CameraVideoSource camera,
+        int width = 120,
+        int? height = null,
+        int quality = 2,
+        double? durationSeconds = null)
+    {
+        ArgumentNullException.ThrowIfNull(camera);
+        ValidateDisplayInput(width, height, quality);
+
+        if (durationSeconds <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(durationSeconds), "Der Timer muss groesser als 0 sein.");
+        }
+
+        if (!IsCommandAvailable("ffmpeg"))
+        {
+            throw new InvalidOperationException("Fuer Kamera-Video wird ffmpeg im Systempfad benoetigt.");
+        }
+
+        VideoInfo videoInfo = new(camera.CameraWidth, camera.CameraHeight);
+        double effectiveDurationSeconds = durationSeconds ?? camera.DurationSeconds ?? 0;
+        int? maxFrames = effectiveDurationSeconds > 0
+            ? (int)global::System.Math.Ceiling(effectiveDurationSeconds * camera.Fps)
+            : null;
+
+        using Process process = StartCameraVideoProcess(camera);
+        RenderVideoStream(process, videoInfo, width, height, quality, camera.Fps, maxFrames);
+    }
+
+    public static void ShowVideo(
         string filePath,
         int width = 120,
         int? height = null,
@@ -45,15 +129,7 @@ public static class ConsoleImages
             throw new ArgumentException("Der Dateipfad darf nicht leer sein.", nameof(filePath));
         }
 
-        if (width <= 0)
-        {
-            throw new ArgumentOutOfRangeException(nameof(width), "Die Breite muss größer als 0 sein.");
-        }
-
-        if (height <= 0)
-        {
-            throw new ArgumentOutOfRangeException(nameof(height), "Die Höhe muss größer als 0 sein.");
-        }
+        ValidateDisplayInput(width, height, quality);
 
         if (fps <= 0)
         {
@@ -81,6 +157,30 @@ public static class ConsoleImages
         }
 
         VideoInfo videoInfo = ReadVideoInfo(filePath);
+        using Process? audioProcess = playAudio ? StartAudioPlaybackProcess(filePath) : null;
+        using Process process = StartVideoDecodeProcess(filePath, fps);
+        RenderVideoStream(process, videoInfo, width, height, quality, fps, maxFrames);
+
+        if (audioProcess is not null)
+        {
+            if (!audioProcess.HasExited)
+            {
+                audioProcess.Kill(entireProcessTree: true);
+            }
+
+            audioProcess.WaitForExit();
+        }
+    }
+
+    private static void RenderVideoStream(
+        Process process,
+        VideoInfo videoInfo,
+        int width,
+        int? height,
+        int quality,
+        double fps,
+        int? maxFrames)
+    {
         ConsoleImageQuality qualityMode = GetQualityMode(quality);
         (int outputWidth, int outputPixelHeight) = ResolveVideoOutputDimensions(
             videoInfo.Width,
@@ -88,8 +188,6 @@ public static class ConsoleImages
             width,
             height,
             qualityMode);
-        using Process? audioProcess = playAudio ? StartAudioPlaybackProcess(filePath) : null;
-        using Process process = StartVideoDecodeProcess(filePath, fps);
         using Stream stream = process.StandardOutput.BaseStream;
         int frameSize = checked(videoInfo.Width * videoInfo.Height * 3);
         byte[] frameBuffer = new byte[frameSize];
@@ -130,18 +228,9 @@ public static class ConsoleImages
             {
                 process.Kill(entireProcessTree: true);
             }
-
-            if (audioProcess is not null && !audioProcess.HasExited)
-            {
-                audioProcess.Kill(entireProcessTree: true);
-            }
         }
 
         process.WaitForExit();
-        if (audioProcess is not null)
-        {
-            audioProcess.WaitForExit();
-        }
 
         if (process.ExitCode != 0 && process.ExitCode != 255)
         {
@@ -677,16 +766,85 @@ public static class ConsoleImages
         return new RgbImage(image.Width, image.Height, image.Data);
     }
 
+    private static void ValidateCameraInput(string cameraPath, int cameraWidth, int cameraHeight)
+    {
+        if (string.IsNullOrWhiteSpace(cameraPath))
+        {
+            throw new ArgumentException("Der Kamerapfad darf nicht leer sein.", nameof(cameraPath));
+        }
+
+        if (cameraWidth <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(cameraWidth), "Die Kamerabreite muss groesser als 0 sein.");
+        }
+
+        if (cameraHeight <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(cameraHeight), "Die Kamerahoehe muss groesser als 0 sein.");
+        }
+    }
+
+    private static void ValidateDisplayInput(int width, int? height, int quality)
+    {
+        if (width <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(width), "Die Breite muss größer als 0 sein.");
+        }
+
+        if (height <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(height), "Die Höhe muss größer als 0 sein.");
+        }
+
+        GetQualityMode(quality);
+    }
+
+    private static Process StartCameraPhotoProcess(string cameraPath, int cameraWidth, int cameraHeight, string outputPath)
+    {
+        ProcessStartInfo startInfo = CreateFfmpegStartInfo();
+
+        startInfo.ArgumentList.Add("-f");
+        startInfo.ArgumentList.Add("v4l2");
+        startInfo.ArgumentList.Add("-video_size");
+        startInfo.ArgumentList.Add($"{cameraWidth}x{cameraHeight}");
+        startInfo.ArgumentList.Add("-i");
+        startInfo.ArgumentList.Add(cameraPath);
+        startInfo.ArgumentList.Add("-frames:v");
+        startInfo.ArgumentList.Add("1");
+        startInfo.ArgumentList.Add("-y");
+        startInfo.ArgumentList.Add(outputPath);
+
+        Process process = new() { StartInfo = startInfo };
+        process.Start();
+        return process;
+    }
+
+    private static Process StartCameraVideoProcess(CameraVideoSource camera)
+    {
+        ProcessStartInfo startInfo = CreateFfmpegStartInfo();
+
+        startInfo.ArgumentList.Add("-f");
+        startInfo.ArgumentList.Add("v4l2");
+        startInfo.ArgumentList.Add("-framerate");
+        startInfo.ArgumentList.Add(camera.Fps.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        startInfo.ArgumentList.Add("-video_size");
+        startInfo.ArgumentList.Add($"{camera.CameraWidth}x{camera.CameraHeight}");
+        startInfo.ArgumentList.Add("-i");
+        startInfo.ArgumentList.Add(camera.CameraPath);
+        startInfo.ArgumentList.Add("-f");
+        startInfo.ArgumentList.Add("rawvideo");
+        startInfo.ArgumentList.Add("-pix_fmt");
+        startInfo.ArgumentList.Add("rgb24");
+        startInfo.ArgumentList.Add("-");
+
+        Process process = new() { StartInfo = startInfo };
+        process.Start();
+        return process;
+    }
+
     private static Process StartVideoDecodeProcess(string filePath, double fps)
     {
-        ProcessStartInfo startInfo = new()
-        {
-            FileName = "ffmpeg",
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true
-        };
+        ProcessStartInfo startInfo = CreateFfmpegStartInfo();
 
         startInfo.ArgumentList.Add("-loglevel");
         startInfo.ArgumentList.Add("error");
@@ -703,6 +861,18 @@ public static class ConsoleImages
         Process process = new() { StartInfo = startInfo };
         process.Start();
         return process;
+    }
+
+    private static ProcessStartInfo CreateFfmpegStartInfo()
+    {
+        return new ProcessStartInfo
+        {
+            FileName = "ffmpeg",
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
     }
 
     private static Process StartAudioPlaybackProcess(string filePath)
