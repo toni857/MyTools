@@ -1,0 +1,34 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <TargetFramework>net10.0</TargetFramework>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+    </PropertyGroup>
+
+    <ItemGroup>
+      <PackageReference Include="StbImageSharp" Version="2.30.15" />
+    </ItemGroup>
+
+    <Target Name="GenerateProgramNames" BeforeTargets="CoreCompile">
+        <PropertyGroup>
+            <GeneratedProgramNamesFile>$(IntermediateOutputPath)ProgramNames.g.cs</GeneratedProgramNamesFile>
+        </PropertyGroup>
+
+        <ItemGroup>
+            <ProgramNamesSourceLines Include="// &lt;auto-generated /&gt;" />
+            <ProgramNamesSourceLines Include="namespace My%3B" />
+            <ProgramNamesSourceLines Include="internal static class ProgramNames" />
+            <ProgramNamesSourceLines Include="{" />
+            <ProgramNamesSourceLines Include="    public const string ThrowawayVariableProgram = &quot;$(ThrowawayProgramName)&quot;%3B" />
+            <ProgramNamesSourceLines Include="}" />
+        </ItemGroup>
+
+        <WriteLinesToFile File="$(GeneratedProgramNamesFile)" Lines="@(ProgramNamesSourceLines)" Overwrite="true" />
+
+        <ItemGroup>
+            <Compile Include="$(GeneratedProgramNamesFile)" Visible="false" />
+        </ItemGroup>
+    </Target>
+
+</Project>
