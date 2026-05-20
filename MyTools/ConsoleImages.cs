@@ -194,8 +194,7 @@ public static class ConsoleImages
         Stopwatch stopwatch = Stopwatch.StartNew();
         int frameIndex = 0;
         double frameDurationMs = 1000d / fps;
-        int outputRowCount = GetOutputRowCount(outputPixelHeight, qualityMode);
-        Console.Write("\x1b[2J");
+        ResetCursorPosition();
 
         try
         {
@@ -211,7 +210,6 @@ public static class ConsoleImages
 
                 ResetCursorPosition();
                 Console.Write(renderedFrame);
-                ClearRemainingFrameArea(outputRowCount);
 
                 frameIndex++;
                 double targetElapsedMs = frameIndex * frameDurationMs;
@@ -481,31 +479,6 @@ public static class ConsoleImages
         }
 
         Console.Write("\x1b[H");
-    }
-
-    private static void ClearRemainingFrameArea(int outputRowCount)
-    {
-        if (outputRowCount <= 0)
-        {
-            return;
-        }
-
-        try
-        {
-            if (!Console.IsOutputRedirected)
-            {
-                int targetTop = global::System.Math.Min(outputRowCount - 1, Console.BufferHeight - 1);
-                Console.SetCursorPosition(0, targetTop);
-                Console.Write("\x1b[0m");
-                return;
-            }
-        }
-        catch (IOException)
-        {
-        }
-        catch (ArgumentOutOfRangeException)
-        {
-        }
     }
 
     private static QuadrantCell BuildQuadrantCell(Rgb topLeft, Rgb topRight, Rgb bottomLeft, Rgb bottomRight)
