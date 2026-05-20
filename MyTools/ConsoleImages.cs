@@ -107,18 +107,12 @@ public static class ConsoleImages
 
         VideoInfo videoInfo = new(camera.CameraWidth, camera.CameraHeight);
         double effectiveDurationSeconds = durationSeconds ?? camera.DurationSeconds ?? 0;
+        int? maxFrames = effectiveDurationSeconds > 0
+            ? (int)global::System.Math.Ceiling(effectiveDurationSeconds * camera.Fps)
+            : null;
 
         using Process process = StartCameraVideoProcess(camera);
-        RenderVideoStream(
-            process,
-            videoInfo,
-            width,
-            height,
-            quality,
-            camera.Fps,
-            maxFrames: null,
-            maxDurationSeconds: effectiveDurationSeconds > 0 ? effectiveDurationSeconds : null,
-            waitBetweenFrames: true);
+        RenderVideoStream(process, videoInfo, width, height, quality, camera.Fps, maxFrames);
     }
 
     public static void ShowVideo(
@@ -185,9 +179,7 @@ public static class ConsoleImages
         int? height,
         int quality,
         double fps,
-        int? maxFrames,
-        double? maxDurationSeconds = null,
-        bool waitBetweenFrames = true)
+        int? maxFrames)
     {
         ConsoleImageQuality qualityMode = GetQualityMode(quality);
         (int outputWidth, int outputPixelHeight) = ResolveVideoOutputDimensions(
@@ -203,12 +195,11 @@ public static class ConsoleImages
         int frameIndex = 0;
         double frameDurationMs = 1000d / fps;
         int outputRowCount = GetOutputRowCount(outputPixelHeight, qualityMode);
-        ClearVideoOutput();
+        Console.Write("\x1b[2J");
 
         try
         {
-            while ((!maxFrames.HasValue || frameIndex < maxFrames.Value)
-                   && (!maxDurationSeconds.HasValue || stopwatch.Elapsed.TotalSeconds < maxDurationSeconds.Value))
+            while (!maxFrames.HasValue || frameIndex < maxFrames.Value)
             {
                 if (!TryReadExact(stream, frameBuffer, frameSize))
                 {
@@ -218,13 +209,14 @@ public static class ConsoleImages
                 RgbImage frame = new(videoInfo.Width, videoInfo.Height, frameBuffer);
                 string renderedFrame = RenderImage(frame, outputWidth, outputPixelHeight, quality);
 
-                MoveVideoCursorHome();
+                ResetCursorPosition();
                 Console.Write(renderedFrame);
+                ClearRemainingFrameArea(outputRowCount);
 
                 frameIndex++;
                 double targetElapsedMs = frameIndex * frameDurationMs;
                 double remainingMs = targetElapsedMs - stopwatch.Elapsed.TotalMilliseconds;
-                if (waitBetweenFrames && remainingMs > 1)
+                if (remainingMs > 1)
                 {
                     Thread.Sleep((int)remainingMs);
                 }
@@ -232,8 +224,6 @@ public static class ConsoleImages
         }
         finally
         {
-            Console.Write("\x1b[0m");
-
             if (!process.HasExited)
             {
                 process.Kill(entireProcessTree: true);
@@ -473,24 +463,7 @@ public static class ConsoleImages
         };
     }
 
-    private static void ClearVideoOutput()
-    {
-        try
-        {
-            Console.Clear();
-            return;
-        }
-        catch (IOException)
-        {
-        }
-        catch (InvalidOperationException)
-        {
-        }
-
-        Console.Write("\x1b[2J\x1b[3J\x1b[H");
-    }
-
-    private static void MoveVideoCursorHome()
+    private static void ResetCursorPosition()
     {
         try
         {
@@ -508,6 +481,31 @@ public static class ConsoleImages
         }
 
         Console.Write("\x1b[H");
+    }
+
+    private static void ClearRemainingFrameArea(int outputRowCount)
+    {
+        if (outputRowCount <= 0)
+        {
+            return;
+        }
+
+        try
+        {
+            if (!Console.IsOutputRedirected)
+            {
+                int targetTop = global::System.Math.Min(outputRowCount - 1, Console.BufferHeight - 1);
+                Console.SetCursorPosition(0, targetTop);
+                Console.Write("\x1b[0m");
+                return;
+            }
+        }
+        catch (IOException)
+        {
+        }
+        catch (ArgumentOutOfRangeException)
+        {
+        }
     }
 
     private static QuadrantCell BuildQuadrantCell(Rgb topLeft, Rgb topRight, Rgb bottomLeft, Rgb bottomRight)
@@ -805,11 +803,12 @@ public static class ConsoleImages
     {
         ProcessStartInfo startInfo = CreateFfmpegStartInfo();
 
-        AddLowLatencyCameraInputArguments(startInfo, cameraWidth, cameraHeight);
+        startInfo.ArgumentList.Add("-f");
+        startInfo.ArgumentList.Add("v4l2");
+        startInfo.ArgumentList.Add("-video_size");
+        startInfo.ArgumentList.Add($"{cameraWidth}x{cameraHeight}");
         startInfo.ArgumentList.Add("-i");
         startInfo.ArgumentList.Add(cameraPath);
-        startInfo.ArgumentList.Add("-f");
-        startInfo.ArgumentList.Add("image2");
         startInfo.ArgumentList.Add("-frames:v");
         startInfo.ArgumentList.Add("1");
         startInfo.ArgumentList.Add("-y");
@@ -824,7 +823,12 @@ public static class ConsoleImages
     {
         ProcessStartInfo startInfo = CreateFfmpegStartInfo();
 
-        AddLowLatencyCameraInputArguments(startInfo, camera.CameraWidth, camera.CameraHeight, camera.Fps);
+        startInfo.ArgumentList.Add("-f");
+        startInfo.ArgumentList.Add("v4l2");
+        startInfo.ArgumentList.Add("-framerate");
+        startInfo.ArgumentList.Add(camera.Fps.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        startInfo.ArgumentList.Add("-video_size");
+        startInfo.ArgumentList.Add($"{camera.CameraWidth}x{camera.CameraHeight}");
         startInfo.ArgumentList.Add("-i");
         startInfo.ArgumentList.Add(camera.CameraPath);
         startInfo.ArgumentList.Add("-f");
@@ -836,37 +840,6 @@ public static class ConsoleImages
         Process process = new() { StartInfo = startInfo };
         process.Start();
         return process;
-    }
-
-    private static void AddLowLatencyCameraInputArguments(
-        ProcessStartInfo startInfo,
-        int cameraWidth,
-        int cameraHeight,
-        double? fps = null)
-    {
-        startInfo.ArgumentList.Add("-loglevel");
-        startInfo.ArgumentList.Add("error");
-        startInfo.ArgumentList.Add("-fflags");
-        startInfo.ArgumentList.Add("nobuffer");
-        startInfo.ArgumentList.Add("-flags");
-        startInfo.ArgumentList.Add("low_delay");
-        startInfo.ArgumentList.Add("-probesize");
-        startInfo.ArgumentList.Add("32");
-        startInfo.ArgumentList.Add("-analyzeduration");
-        startInfo.ArgumentList.Add("0");
-        startInfo.ArgumentList.Add("-thread_queue_size");
-        startInfo.ArgumentList.Add("1");
-        startInfo.ArgumentList.Add("-f");
-        startInfo.ArgumentList.Add("v4l2");
-
-        if (fps.HasValue)
-        {
-            startInfo.ArgumentList.Add("-framerate");
-            startInfo.ArgumentList.Add(fps.Value.ToString(System.Globalization.CultureInfo.InvariantCulture));
-        }
-
-        startInfo.ArgumentList.Add("-video_size");
-        startInfo.ArgumentList.Add($"{cameraWidth}x{cameraHeight}");
     }
 
     private static Process StartVideoDecodeProcess(string filePath, double fps)
