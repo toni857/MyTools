@@ -107,12 +107,18 @@ public static class ConsoleImages
 
         VideoInfo videoInfo = new(camera.CameraWidth, camera.CameraHeight);
         double effectiveDurationSeconds = durationSeconds ?? camera.DurationSeconds ?? 0;
-        int? maxFrames = effectiveDurationSeconds > 0
-            ? (int)global::System.Math.Ceiling(effectiveDurationSeconds * camera.Fps)
-            : null;
 
         using Process process = StartCameraVideoProcess(camera);
-        RenderVideoStream(process, videoInfo, width, height, quality, camera.Fps, maxFrames);
+        RenderVideoStream(
+            process,
+            videoInfo,
+            width,
+            height,
+            quality,
+            camera.Fps,
+            maxFrames: null,
+            maxDurationSeconds: effectiveDurationSeconds > 0 ? effectiveDurationSeconds : null,
+            waitBetweenFrames: false);
     }
 
     public static void ShowVideo(
@@ -179,7 +185,9 @@ public static class ConsoleImages
         int? height,
         int quality,
         double fps,
-        int? maxFrames)
+        int? maxFrames,
+        double? maxDurationSeconds = null,
+        bool waitBetweenFrames = true)
     {
         ConsoleImageQuality qualityMode = GetQualityMode(quality);
         (int outputWidth, int outputPixelHeight) = ResolveVideoOutputDimensions(
@@ -199,7 +207,8 @@ public static class ConsoleImages
 
         try
         {
-            while (!maxFrames.HasValue || frameIndex < maxFrames.Value)
+            while ((!maxFrames.HasValue || frameIndex < maxFrames.Value)
+                   && (!maxDurationSeconds.HasValue || stopwatch.Elapsed.TotalSeconds < maxDurationSeconds.Value))
             {
                 if (!TryReadExact(stream, frameBuffer, frameSize))
                 {
@@ -216,7 +225,7 @@ public static class ConsoleImages
                 frameIndex++;
                 double targetElapsedMs = frameIndex * frameDurationMs;
                 double remainingMs = targetElapsedMs - stopwatch.Elapsed.TotalMilliseconds;
-                if (remainingMs > 1)
+                if (waitBetweenFrames && remainingMs > 1)
                 {
                     Thread.Sleep((int)remainingMs);
                 }
@@ -803,12 +812,11 @@ public static class ConsoleImages
     {
         ProcessStartInfo startInfo = CreateFfmpegStartInfo();
 
-        startInfo.ArgumentList.Add("-f");
-        startInfo.ArgumentList.Add("v4l2");
-        startInfo.ArgumentList.Add("-video_size");
-        startInfo.ArgumentList.Add($"{cameraWidth}x{cameraHeight}");
+        AddLowLatencyCameraInputArguments(startInfo, cameraWidth, cameraHeight);
         startInfo.ArgumentList.Add("-i");
         startInfo.ArgumentList.Add(cameraPath);
+        startInfo.ArgumentList.Add("-f");
+        startInfo.ArgumentList.Add("image2");
         startInfo.ArgumentList.Add("-frames:v");
         startInfo.ArgumentList.Add("1");
         startInfo.ArgumentList.Add("-y");
@@ -823,12 +831,7 @@ public static class ConsoleImages
     {
         ProcessStartInfo startInfo = CreateFfmpegStartInfo();
 
-        startInfo.ArgumentList.Add("-f");
-        startInfo.ArgumentList.Add("v4l2");
-        startInfo.ArgumentList.Add("-framerate");
-        startInfo.ArgumentList.Add(camera.Fps.ToString(System.Globalization.CultureInfo.InvariantCulture));
-        startInfo.ArgumentList.Add("-video_size");
-        startInfo.ArgumentList.Add($"{camera.CameraWidth}x{camera.CameraHeight}");
+        AddLowLatencyCameraInputArguments(startInfo, camera.CameraWidth, camera.CameraHeight, camera.Fps);
         startInfo.ArgumentList.Add("-i");
         startInfo.ArgumentList.Add(camera.CameraPath);
         startInfo.ArgumentList.Add("-f");
@@ -840,6 +843,37 @@ public static class ConsoleImages
         Process process = new() { StartInfo = startInfo };
         process.Start();
         return process;
+    }
+
+    private static void AddLowLatencyCameraInputArguments(
+        ProcessStartInfo startInfo,
+        int cameraWidth,
+        int cameraHeight,
+        double? fps = null)
+    {
+        startInfo.ArgumentList.Add("-loglevel");
+        startInfo.ArgumentList.Add("error");
+        startInfo.ArgumentList.Add("-fflags");
+        startInfo.ArgumentList.Add("nobuffer");
+        startInfo.ArgumentList.Add("-flags");
+        startInfo.ArgumentList.Add("low_delay");
+        startInfo.ArgumentList.Add("-probesize");
+        startInfo.ArgumentList.Add("32");
+        startInfo.ArgumentList.Add("-analyzeduration");
+        startInfo.ArgumentList.Add("0");
+        startInfo.ArgumentList.Add("-thread_queue_size");
+        startInfo.ArgumentList.Add("1");
+        startInfo.ArgumentList.Add("-f");
+        startInfo.ArgumentList.Add("v4l2");
+
+        if (fps.HasValue)
+        {
+            startInfo.ArgumentList.Add("-framerate");
+            startInfo.ArgumentList.Add(fps.Value.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        }
+
+        startInfo.ArgumentList.Add("-video_size");
+        startInfo.ArgumentList.Add($"{cameraWidth}x{cameraHeight}");
     }
 
     private static Process StartVideoDecodeProcess(string filePath, double fps)
