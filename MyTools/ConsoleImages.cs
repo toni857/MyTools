@@ -118,7 +118,7 @@ public static class ConsoleImages
             camera.Fps,
             maxFrames: null,
             maxDurationSeconds: effectiveDurationSeconds > 0 ? effectiveDurationSeconds : null,
-            waitBetweenFrames: false);
+            waitBetweenFrames: true);
     }
 
     public static void ShowVideo(
@@ -218,7 +218,7 @@ public static class ConsoleImages
                 RgbImage frame = new(videoInfo.Width, videoInfo.Height, frameBuffer);
                 string renderedFrame = RenderImage(frame, outputWidth, outputPixelHeight, quality);
 
-                ClearVideoOutput();
+                MoveVideoCursorHome();
                 Console.Write(renderedFrame);
 
                 frameIndex++;
@@ -488,6 +488,26 @@ public static class ConsoleImages
         }
 
         Console.Write("\x1b[2J\x1b[3J\x1b[H");
+    }
+
+    private static void MoveVideoCursorHome()
+    {
+        try
+        {
+            if (!Console.IsOutputRedirected)
+            {
+                Console.SetCursorPosition(0, 0);
+                return;
+            }
+        }
+        catch (IOException)
+        {
+        }
+        catch (ArgumentOutOfRangeException)
+        {
+        }
+
+        Console.Write("\x1b[H");
     }
 
     private static QuadrantCell BuildQuadrantCell(Rgb topLeft, Rgb topRight, Rgb bottomLeft, Rgb bottomRight)
