@@ -203,7 +203,7 @@ public static class ConsoleImages
         int frameIndex = 0;
         double frameDurationMs = 1000d / fps;
         int outputRowCount = GetOutputRowCount(outputPixelHeight, qualityMode);
-        Console.Write("\x1b[2J");
+        ClearVideoOutput();
 
         try
         {
@@ -218,9 +218,8 @@ public static class ConsoleImages
                 RgbImage frame = new(videoInfo.Width, videoInfo.Height, frameBuffer);
                 string renderedFrame = RenderImage(frame, outputWidth, outputPixelHeight, quality);
 
-                ResetCursorPosition();
+                PrepareFrameArea(outputRowCount);
                 Console.Write(renderedFrame);
-                ClearRemainingFrameArea(outputRowCount);
 
                 frameIndex++;
                 double targetElapsedMs = frameIndex * frameDurationMs;
@@ -233,6 +232,8 @@ public static class ConsoleImages
         }
         finally
         {
+            Console.Write("\x1b[0m");
+
             if (!process.HasExited)
             {
                 process.Kill(entireProcessTree: true);
@@ -472,12 +473,47 @@ public static class ConsoleImages
         };
     }
 
-    private static void ResetCursorPosition()
+    private static void ClearVideoOutput()
     {
         try
         {
             if (!Console.IsOutputRedirected)
             {
+                Console.Clear();
+                return;
+            }
+        }
+        catch (IOException)
+        {
+        }
+        catch (InvalidOperationException)
+        {
+        }
+
+        Console.Write("\x1b[2J\x1b[H");
+    }
+
+    private static void PrepareFrameArea(int outputRowCount)
+    {
+        if (outputRowCount <= 0)
+        {
+            return;
+        }
+
+        try
+        {
+            if (!Console.IsOutputRedirected)
+            {
+                int clearWidth = global::System.Math.Max(1, Console.BufferWidth - 1);
+                int clearRows = global::System.Math.Min(outputRowCount, Console.BufferHeight);
+                string blankLine = new(' ', clearWidth);
+
+                for (int row = 0; row < clearRows; row++)
+                {
+                    Console.SetCursorPosition(0, row);
+                    Console.Write(blankLine);
+                }
+
                 Console.SetCursorPosition(0, 0);
                 return;
             }
@@ -489,32 +525,7 @@ public static class ConsoleImages
         {
         }
 
-        Console.Write("\x1b[H");
-    }
-
-    private static void ClearRemainingFrameArea(int outputRowCount)
-    {
-        if (outputRowCount <= 0)
-        {
-            return;
-        }
-
-        try
-        {
-            if (!Console.IsOutputRedirected)
-            {
-                int targetTop = global::System.Math.Min(outputRowCount - 1, Console.BufferHeight - 1);
-                Console.SetCursorPosition(0, targetTop);
-                Console.Write("\x1b[0m");
-                return;
-            }
-        }
-        catch (IOException)
-        {
-        }
-        catch (ArgumentOutOfRangeException)
-        {
-        }
+        Console.Write("\x1b[H\x1b[J");
     }
 
     private static QuadrantCell BuildQuadrantCell(Rgb topLeft, Rgb topRight, Rgb bottomLeft, Rgb bottomRight)

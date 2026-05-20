@@ -21,6 +21,11 @@ public static class Console
         System.Console.Write(value);
     }
 
+    public static void Clear()
+    {
+        System.Console.Clear();
+    }
+
     public static ConsoleKeyInfo ReadKey(bool intercept = false)
     {
         return System.Console.ReadKey(intercept);
