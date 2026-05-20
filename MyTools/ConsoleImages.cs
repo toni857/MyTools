@@ -218,7 +218,7 @@ public static class ConsoleImages
                 RgbImage frame = new(videoInfo.Width, videoInfo.Height, frameBuffer);
                 string renderedFrame = RenderImage(frame, outputWidth, outputPixelHeight, quality);
 
-                PrepareFrameArea(outputRowCount);
+                ClearVideoOutput();
                 Console.Write(renderedFrame);
 
                 frameIndex++;
@@ -477,11 +477,8 @@ public static class ConsoleImages
     {
         try
         {
-            if (!Console.IsOutputRedirected)
-            {
-                Console.Clear();
-                return;
-            }
+            Console.Clear();
+            return;
         }
         catch (IOException)
         {
@@ -490,42 +487,7 @@ public static class ConsoleImages
         {
         }
 
-        Console.Write("\x1b[2J\x1b[H");
-    }
-
-    private static void PrepareFrameArea(int outputRowCount)
-    {
-        if (outputRowCount <= 0)
-        {
-            return;
-        }
-
-        try
-        {
-            if (!Console.IsOutputRedirected)
-            {
-                int clearWidth = global::System.Math.Max(1, Console.BufferWidth - 1);
-                int clearRows = global::System.Math.Min(outputRowCount, Console.BufferHeight);
-                string blankLine = new(' ', clearWidth);
-
-                for (int row = 0; row < clearRows; row++)
-                {
-                    Console.SetCursorPosition(0, row);
-                    Console.Write(blankLine);
-                }
-
-                Console.SetCursorPosition(0, 0);
-                return;
-            }
-        }
-        catch (IOException)
-        {
-        }
-        catch (ArgumentOutOfRangeException)
-        {
-        }
-
-        Console.Write("\x1b[H\x1b[J");
+        Console.Write("\x1b[2J\x1b[3J\x1b[H");
     }
 
     private static QuadrantCell BuildQuadrantCell(Rgb topLeft, Rgb topRight, Rgb bottomLeft, Rgb bottomRight)
