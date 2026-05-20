@@ -194,7 +194,7 @@ public static class ConsoleImages
         Stopwatch stopwatch = Stopwatch.StartNew();
         int frameIndex = 0;
         double frameDurationMs = 1000d / fps;
-        ResetCursorPosition();
+        int outputRowCount = GetOutputRowCount(outputPixelHeight, qualityMode);
 
         try
         {
@@ -208,7 +208,7 @@ public static class ConsoleImages
                 RgbImage frame = new(videoInfo.Width, videoInfo.Height, frameBuffer);
                 string renderedFrame = RenderImage(frame, outputWidth, outputPixelHeight, quality);
 
-                ResetCursorPosition();
+                MoveToFrameStart(outputRowCount, frameIndex > 0);
                 Console.Write(renderedFrame);
 
                 frameIndex++;
@@ -222,6 +222,9 @@ public static class ConsoleImages
         }
         finally
         {
+            Console.Write("\x1b[0m");
+            Console.WriteLine();
+
             if (!process.HasExited)
             {
                 process.Kill(entireProcessTree: true);
@@ -451,7 +454,7 @@ public static class ConsoleImages
         builder.Append("\x1b[0m");
         if (row < outputRowCount - 1)
         {
-            builder.AppendLine();
+            builder.Append("\r\n");
         }
     }
 
@@ -477,24 +480,20 @@ public static class ConsoleImages
         };
     }
 
-    private static void ResetCursorPosition()
+    private static void MoveToFrameStart(int outputRowCount, bool hasPreviousFrame)
     {
-        try
+        if (!hasPreviousFrame)
         {
-            if (!Console.IsOutputRedirected)
-            {
-                Console.SetCursorPosition(0, 0);
-                return;
-            }
-        }
-        catch (IOException)
-        {
-        }
-        catch (ArgumentOutOfRangeException)
-        {
+            return;
         }
 
-        Console.Write("\x1b[H");
+        if (outputRowCount <= 1)
+        {
+            Console.Write("\r");
+            return;
+        }
+
+        Console.Write($"\x1b[{outputRowCount - 1}F");
     }
 
     private static QuadrantCell BuildQuadrantCell(Rgb topLeft, Rgb topRight, Rgb bottomLeft, Rgb bottomRight)
